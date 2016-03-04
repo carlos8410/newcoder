@@ -33,5 +33,7 @@ def parse(raw_file, delimiter):
 
 if __name__ == "__main__":
     parsed_data = parse(MY_FILE, ',')
+    for item in parsed_data:
+        print item
 
 
