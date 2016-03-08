@@ -43,13 +43,12 @@ class CPIData(object):
             #         out.write(chunk)
             with open(save_as_file, 'wb+') as out:
                 while True:
-                    buffer = fp.read(chunk_size):
+                    buffer = fp.read(chunk_size)
                     if not buffer:
                         break
                     out.write(buffer)
             with open(save_as_file) as fp:
                 return self.load_from_file(fp)
-
         return fp
 
     def load_from_file(self, fp):
@@ -100,6 +99,67 @@ class CPIData(object):
         current_year_cpi = self.year_cpi[current_year]
         return float(price) / given_year_cpi * current_year_cpi
 
+class GiantbombAPI(object):
+    """
+    Very simple implementation of the Giantbomb API that only offers the
+    GET /platforms/ call as a generator.
+
+    Note that this implementation only exposes of the API what we really need.
+    """
+
+    base_url = 'http://www.giantbomb.com/api'
+
+    def __init__(self, api_key):
+        self.api_key = api_key
+
+    def get_platforms(self, sort=None, filter=None, field_list=None):
+        """Generator yielding platforms matching the given criteria. If no
+        limit is specified, this will return *all* platforms.
+
+        """
+
+        # The API itself allows us to filter the data returned either
+        # by requesting only a subset of data elements or a subset with each
+        # data element (like only the name, the price and the release date).
+        #
+        # The following lines also do value-format conversions from what's
+        # common in Python (lists, dictionaries) into what the API requires.
+        # This is especially apparent with the filter-parameter where we
+        # need to convert a dictionary of criteria into a comma-seperated
+        # list of key:value pairs.
+        params = {}
+        if sort is not None:
+            params['sort'] = sort
+        if field_list is not None:
+            params['field_list'] = ','.join(field_list)
+        if filter is not None:
+            params['filter'] = filter
+            parsed_filters = []
+            for key, value in filter.iteritems():
+                parsed_filters.append('%s:%s' % (key, value))
+            params['filters'] = ','.join(parsed_filters)
+        # Last but not least we append our API key to the list of parameters
+        # and tell the API that we would like to have our data being returned
+        # as JSON.
+        params['api_key'] = self.api_key
+        params['format'] = 'json'
+        return params
+
+        incomplete_result = True
+        num_total_results = None
+        num_fetched_results = 0
+        counter = 0
+
+
+
+if __name__ == "__main__":
+
+    api_key = '16ea5e3fe24beae22f39bc4f3cc950fba854a8ae'
+    api_instance = GiantbombAPI(api_key)
+    params = api_instance.get_platforms(sort=None, filter=None, field_list=None)
+    print params
+
+
 def main():
     """This function handles the actual logic of this script."""
     try:
@@ -111,6 +171,7 @@ def main():
         if Headline_of_Data in line:
             break
     for line in raw_data:
+        pass
         
 
 
