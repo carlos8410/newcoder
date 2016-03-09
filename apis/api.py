@@ -1,5 +1,8 @@
 FILE_PATH = ''
 import urllib2
+import logging
+import requests
+
 CPI_DATA_URL = 'https://research.stlouisfed.org/fred2/data/CPIAUCSL.txt'
 Headline_of_Data = "DATE          VALUE"
 
@@ -103,8 +106,7 @@ class GiantbombAPI(object):
     """
     Very simple implementation of the Giantbomb API that only offers the
     GET /platforms/ call as a generator.
-
-    Note that this implementation only exposes of the API what we really need.
+    Note that this implementation only exposes what we really need of the API.
     """
 
     base_url = 'http://www.giantbomb.com/api'
@@ -115,7 +117,6 @@ class GiantbombAPI(object):
     def get_platforms(self, sort=None, filter=None, field_list=None):
         """Generator yielding platforms matching the given criteria. If no
         limit is specified, this will return *all* platforms.
-
         """
 
         # The API itself allows us to filter the data returned either
@@ -136,46 +137,111 @@ class GiantbombAPI(object):
             params['filter'] = filter
             parsed_filters = []
             for key, value in filter.iteritems():
-                parsed_filters.append('%s:%s' % (key, value))
-            params['filters'] = ','.join(parsed_filters)
+                parsed_filters.append('{0}:{1}'.format(key, value))
+            params['filter'] = ','.join(parsed_filters)
+
         # Last but not least we append our API key to the list of parameters
         # and tell the API that we would like to have our data being returned
         # as JSON.
         params['api_key'] = self.api_key
         params['format'] = 'json'
-        return params
 
         incomplete_result = True
         num_total_results = None
         num_fetched_results = 0
         counter = 0
 
+        while incomplete_result:
+            # Giantbomb's limit for items in a result set for this API is 100
+            # items. But given that there are more than 100 platforms in their
+            # database we will have to fetch them in more than one call.
+            #
+            # Most APIs that have such limits (and most do) offer a way to
+            # page through result sets using either a "page" or (as is here
+            # the case) an "offset" parameter which allows you to "skip" a
+            # certain number of items.
+            params['offset'] = num_fetched_results
+            result = requests.get(self.base_url + '/platforms/',
+                                  params=params)
+            result = result.json()
+            if num_total_results is None:
+                num_total_results = int(result['number_of_total_results'])
+            num_fetched_results += int(result['number_of_page_results'])
+            if num_fetched_results >= num_total_results:
+                incomplete_result = False
+            for item in result['results']:
+                logging.debug("Yielding platform {0} of {1}".format(
+                    counter + 1,
+                    num_total_results))
+
+                # Since this is supposed to be an abstraction, we also convert
+                # values here into a more useful format where appropriate.
+                if 'original_price' in item and item['original_price']:
+                    item['original_price'] = float(item['original_price'])
+
+                # The "yield" keyword is what makes this a generator.
+                # Implementing this method as generator has the advantage
+                # that we can stop fetching of further data from the server
+                # dynamically from the outside by simply stop iterating over
+                # the generator.
+                yield item
+                counter += 1
+
+def is_valid_dataset(platform):
+    """Filters out datasets that we can't use since they are either lacking
+    a release date or an original price. For rendering the output we also
+    require the name and abbreviation of the platform.
+
+    """
+    if 'release_date' not in platform or not platform['release_date']:
+        logging.warn(u"%s has no release date" % platform['name'])
+        return False
+    if 'original_price' not in platform or not platform['original_price']:
+        logging.warn(u"%s has no original price" % platform['name'])
+        return False
+    if 'name' not in platform or not platform['name']:
+        logging.warn(u"No platform name found for a given dataset")
+        return False
+    if 'abbreviation' not in platform or not platform['abbreviation']:
+        logging.warn(u"%s has no abbreviation" % platform['name'])
+        return False
+    return True
 
 
 if __name__ == "__main__":
 
     api_key = '16ea5e3fe24beae22f39bc4f3cc950fba854a8ae'
+
+    cpi_data = CPIData()
     api_instance = GiantbombAPI(api_key)
+
     params = api_instance.get_platforms(sort=None, filter=None, field_list=None)
     print params
-
+    for platform in api_instance.get_platforms(sort='release_date:desc',
+                                        field_list=['release_date',
+                                                 'original_price', 'name',
+                                                 'abbreviation']):
+        # Some platforms don't have a release date or price yet. These we have
+        # to skip.
+        if not is_valid_dataset(platform):
+            continue
+        print "Valid result"
 
 def main():
     """This function handles the actual logic of this script."""
-    try:
-        raw_data = urllib2.urlopen(CPI_DATA_URL)
-    except:
-        print "Exception in reading data from target url \n%s" % CPI_DATA_URL
-    cpi_data = []
-    for line in raw_data:
-        if Headline_of_Data in line:
-            break
-    for line in raw_data:
-        pass
-        
+    # try:
+    #     raw_data = urllib2.urlopen(CPI_DATA_URL)
+    # except:
+    #     print "Exception in reading data from target url \n%s" % CPI_DATA_URL
+    # cpi_data = []
+    # for line in raw_data:
+    #     if Headline_of_Data in line:
+    #         break
+    # for line in raw_data:
+    #     pass
 
 
-    # Grab CPI/Inflation data.
+
     
     # Grab API/game platform data.
 
