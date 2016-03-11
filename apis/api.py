@@ -4,6 +4,9 @@ import logging
 import requests
 import matplotlib.pyplot as plt 
 import numpy
+import tablib
+import argparse
+import os
 
 CPI_DATA_URL = 'https://research.stlouisfed.org/fred2/data/CPIAUCSL.txt'
 Headline_of_Data = "DATE          VALUE"
@@ -62,12 +65,15 @@ class CPIData(object):
         # variables:
         current_year = None
         year_cpi = []
-        for line in cp:
+
+        for line in fp:
+            if line.startswith("DATE"):
+                break
+                
+        for line in fp:
             # The actual content of the file starts with a header line
             # starting with the string "DATE ". Until we reach this line
             # we can skip ahead.
-            while not line.startwith("DATE "):
-                continue
             data = line.rstrip().split()
             year = int(data[0].split('-')[0])
             cpi = float(data[1])
@@ -84,7 +90,7 @@ class CPIData(object):
             year_cpi.append(cpi)
         if current_year is not None and current_year not in self.year_cpi:
             self.year_cpi[current_year] = sum(year_cpi) / len(year_cpi)
-                
+        return year_cpi
 
     def get_adjusted_price(self, price, year, current_year=None):
         """Returns the adapted price from a given year compared to what current
@@ -274,27 +280,103 @@ def visualize_type(parsed_data):
     plt.clf()
 
 
+def generate_csv(platforms, output_file):
+    """Writes the given platforms into a CSV file specified by the output_file
+    parameter.
+
+    The output_file can either be the path to a file or a file-like object.
+
+    """
+    data = tablib.Dateset(headers=['name', 'abbreviation', 'original_price', 'release_date'])
+    for p in platforms: 
+        data.append([platform['name'], platform['abbreviation'], platform['original_price'],
+        platform['release_date']])
+    
+    # If the output_file is a string it represents a path to a file which
+    # we will have to open first for writing. Otherwise we just assume that
+    # it is already a file-like object and write the data into it.
+    if isinstance(output_file, basestring):
+        with open(output_file, 'w+') as f:
+            f.write(data.csv)
+    else:
+        output_file.write(data.csv)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--giantbomb-api-key', required=True, help='API key provided by Giantbomb.com')
+    parser.add_argument('--cpi-file', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'CPIAUCSL.txt'),
+                        help='Path to file containing the CPI data (also acts as target file if the ' 
+                            'data has to be downloaded first).')
+    parser.add_argument('--cpi-data-url', default=CPI_DATA_URL, 
+                        help='URL which should be used as CPI data source')
+    parser.add_argument('--debug', default=False, action='store_true',
+                        help='Increases the output level.')
+    parser.add_argument('--csv-file', help='Path to CSV file which should contain the data output')
+    parser.add_argument('--plot-file', help='Path to PNG file which should contain the data output')
+    parser.add_argument('--limit', type=int, help='Number of recent platforms to be considered')
+
+    opts = parser.parse_args()
+    if not opts.plot_file and not opts.csv_file:
+        parser.error("You have to specify either a --csv-file or --plot-file!")
+
+    return opts
+    
+
 if __name__ == "__main__":
 
-    api_key = '16ea5e3fe24beae22f39bc4f3cc950fba854a8ae'
+    # api_key = '16ea5e3fe24beae22f39bc4f3cc950fba854a8ae'
 
+    opts = parse_args()
+    if opts.debug:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+    
     cpi_data = CPIData()
-    api_instance = GiantbombAPI(api_key)
+    api_instance = GiantbombAPI(opts.giantbomb_api_key)
 
-    params = api_instance.get_platforms(sort=None, filter=None, field_list=None)
-    print params
+    print ("Disclaimer: This script uses data provided by FRED, Federal"
+           " Reserve Economic Data, from the Federal Reserve Bank of St. Louis"
+           " and Giantbomb.com:\n- {0}\n- http://www.giantbomb.com/api/\n"
+           .format(CPI_DATA_URL))
+
+    if os.path.exists(opts.cpi_file):
+        with open(opts.cpi_file) as f:
+            cpi_data.load_from_file(f)
+    else:
+        cpi_data.load_from_url(opts.cpi_data_url, save_as_file=opts.cpi_file)
+    platforms = []
+    counter = 0
+
     for platform in api_instance.get_platforms(sort='release_date:desc',
-                                        field_list=['release_date',
-                                                 'original_price', 'name',
-                                                 'abbreviation']):
-        # Some platforms don't have a release date or price yet. These we have
-        # to skip.
+        field_list=['release_date', 'original_price', 'name', 'abbreviation']):
+        # Some platforms don't have a release date or price yet. These we have to skip.
         if not is_valid_dataset(platform):
             continue
-        print "Valid result"
+        year = int(platform['release_date'].split('-')[0])
+        price = int(platform['original_price'])
+        adjusted_price = cpi_data.get_adjusted_price(price, year)
+        platform['release_date'] = year
+        platform['original_price'] = price
+        platforms.append(platform)
 
-def main():
-    """This function handles the actual logic of this script."""
+        # We limit the result set on this end since we can only here check
+        # if the dataset actually contains all the data we need and therefor
+        # can't filter on the API level.
+        if opts.limit and counter + 1 >= opts.limit:
+            break
+        counter += 1
+
+    if opts.plot_file:
+        generate_plot(platforms, opts.plot_file)
+    if opts.csv_file:
+        generate_csv(platforms, opts.csv_file)
+
+# python api.py --giantbomb-api-key '16ea5e3fe24beae22f39bc4f3cc950fba854a8ae' --debug --limit 40 --csv-file my_csv.csv
+
+
+    # Piece of get content from url, using library urllib2
     # try:
     #     raw_data = urllib2.urlopen(CPI_DATA_URL)
     # except:
@@ -308,15 +390,3 @@ def main():
 
 
 
-    
-    # Grab API/game platform data.
-
-    # Figure out the current price of each platform.
-    # This will require looping through each game platform we received, and
-    # calculate the adjusted price based on the CPI data we also received.
-    # During this point, we should also validate our data so we do not skew
-    # our results.
-
-    # Generate a plot/bar graph for the adjusted price data.
-
-    # Generate a CSV file to save for the adjusted price data.
